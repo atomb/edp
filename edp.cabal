@@ -14,6 +14,7 @@ executable edp
   build-depends:     base,
                      blaze-builder,
                      blaze-html,
+                     bytestring,
                      cascading,
                      containers,
                      mtl,
