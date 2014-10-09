@@ -1,0 +1,24 @@
+name:                edp
+version:             0.1.0.0
+synopsis:            Existential Diagram Prover
+license:             BSD3
+author:              Aaron Tomb
+maintainer:          aarontomb@gmail.com
+category:            Formal Methods
+build-type:          Simple
+cabal-version:       >=1.8
+
+executable edp
+  main-is:           Main.hs
+  hs-source-dirs:    src
+  build-depends:     base,
+                     blaze-builder,
+                     blaze-html,
+                     cascading,
+                     containers,
+                     mtl,
+                     rosezipper,
+                     snap-core,
+                     snap-server,
+                     split
+  ghc-options:       -Wall
