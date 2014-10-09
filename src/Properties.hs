@@ -80,7 +80,7 @@ instance (Arbitrary a) => Arbitrary (Term a) where
         atoms <- vectorOf natoms arbitrary
         subs <- vectorOf nsubs (arbTerm (n `div` 2))
         return (Node atoms subs)
- 
+
 instance (Arbitrary a) => Arbitrary (PosTerm a) where
   arbitrary = sized arbTermPos
     where
@@ -102,7 +102,7 @@ instance (Arbitrary a) => Arbitrary (AtomPosTerm a) where
 
 testAll :: IO ()
 testAll = mapM_ (quickCheckWith (stdArgs { maxSize = 30 }))
-          [ label "hasAddDoubleNeg"  prop_hasAddDoubleNeg 
+          [ label "hasAddDoubleNeg"  prop_hasAddDoubleNeg
           , label "parseShowPos"     prop_parseShowPos
           , label "parseShowAtomPos" prop_parseShowAtomPos
           , label "allPosDelete"     prop_allPosDelete

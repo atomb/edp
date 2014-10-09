@@ -5,6 +5,8 @@ module ToHtml where
 import           Control.Monad.Writer.Lazy
 import           Data.CSS
 import           Data.String
+import qualified Data.Set as Set
+import           Data.Set (Set)
 import           Data.Tree
 import           Prelude hiding (div)
 import           Text.Blaze.Html5 (Html, toHtml, div, (!))
@@ -20,62 +22,80 @@ posId = A.id . fromString . showPos
 atomPosId :: AtomPos -> H.Attribute
 atomPosId = A.id . fromString . showAtomPos
 
-deleteURI :: Pos -> Html -> Html
-deleteURI p b =
-  H.a ! href (fromString ("/delete?pos=" ++ showPos p)) $ b
+binopLink :: String -> (p -> String) -> p -> p -> Html -> Html
+binopLink method pShow p p' b =
+  H.a ! href (fromString ("/" ++ method ++ "?outer=" ++
+                          pShow p ++
+                          "&inner=" ++
+                          pShow p')) $ b
 
-deleteAtomURI :: AtomPos -> Html -> Html
-deleteAtomURI p b =
-  H.a ! href (fromString ("/deleteAtom?pos=" ++ showAtomPos p)) $ b
+unopLink :: String -> (p -> String) -> p -> Html -> Html
+unopLink method pShow p b =
+  H.a ! href (fromString ("/" ++ method ++ "?pos=" ++ pShow p)) $ b
 
-copyURI :: Pos -> Pos -> Html -> Html
-copyURI p p' b =
-  H.a ! href (fromString ("/copy?src=" ++
-                          showPos p ++
-                          "&dst=" ++
-                          showPos p')) $ b
+delTermLink :: Pos -> Html -> Html
+delTermLink = unopLink "deleteTerm" showPos
 
-addDoubleNeg :: Pos -> Html -> Html
-addDoubleNeg p b =
-  H.a ! href (fromString ("/addnotnot?pos=" ++ showPos p)) $ b
+delAtomLink :: AtomPos -> Html -> Html
+delAtomLink = unopLink "deleteAtom" showAtomPos
 
-delDoubleNeg :: Pos -> Html -> Html
-delDoubleNeg p b =
-  H.a ! href (fromString ("/delnotnot?pos=" ++ showPos p)) $ b
+addDoubleNegLink :: Pos -> Html -> Html
+addDoubleNegLink = unopLink "addNotNot" showPos
 
-atomDiv :: Bool -> AtomPos -> Html -> Html
-atomDiv pol p h =
-  div ! class_ "atom" ! atomPosId p $ h >> deleteAtomLink pol p
+delDoubleNegLink :: Pos -> Html -> Html
+delDoubleNegLink = unopLink "delNotNot" showPos
 
-deleteLink :: Bool -> Pos -> Html
-deleteLink False _ = ""
-deleteLink True p = toHtml [ "[", deleteURI p "remove", "]" ]
+copyTermLink :: Pos -> Pos -> Html -> Html
+copyTermLink = binopLink "copyTerm" showPos
 
-deleteAtomLink :: Bool -> AtomPos -> Html
-deleteAtomLink True _ = ""
-deleteAtomLink False p = toHtml [ "[", deleteAtomURI p "remove", "]" ]
+copyAtomLink :: AtomPos -> AtomPos -> Html -> Html
+copyAtomLink = binopLink "copyAtom" showAtomPos
 
-notDiv :: Bool -> Bool -> Pos -> Html -> Html
-notDiv isDonut pol p h = div ! class_ cls ! posId p $
-                         deleteLink isDonut p >> h
-  where
-    cls = fromString $ unwords [polText, donutText, "not"]
-    polText = if pol then "unshaded" else "shaded"
-    donutText = if isDonut then "donut" else ""
+atomDiv :: Bool -> Bool -> AtomPos -> Html -> Html
+atomDiv pol seen p h =
+  div ! class_ "atom" ! atomPosId p $
+    h >> delAtomText (pol && not seen) p
 
-renderTerm :: (a -> Html) -> Bool -> Pos -> Term a -> Html
-renderTerm renderAtom pol p tt@(Node as ts) =
+delTermText :: Bool -> Pos -> Html
+delTermText False _ = ""
+delTermText True p = toHtml [ "[", delTermLink p "remove", "]" ]
+
+delNotNotText :: Bool -> Pos -> Html
+delNotNotText False _ = ""
+delNotNotText True p = toHtml [ "[", delDoubleNegLink p "remove", "]" ]
+
+delAtomText :: Bool -> AtomPos -> Html
+delAtomText True _ = ""
+delAtomText False p = toHtml [ "[", delAtomLink p "remove", "]" ]
+
+notDiv :: Bool -> Bool -> Bool -> Bool -> Pos -> Html -> Html
+notDiv isDonut pol seen emp p h =
+  div ! class_ cls ! posId p $
+    h >> delNotNotText isDonut p >> delTermText seen p >> emptyText
+      where
+        cls = fromString $ unwords [polText, donutText, "not"]
+        polText = if pol then "unshaded" else "shaded"
+        donutText = if isDonut then "donut" else ""
+        emptyText = if emp && not pol then "Done!" else ""
+
+renderTerm :: (Eq a, Ord a, Show a) =>
+              (a -> Html) -> Set a -> Set (Term a) -> Bool -> Pos -> Term a -> Html
+renderTerm renderAtom atoms tms pol p tt@(Node as ts) =
   toHtml $ map doAtom (zip [0..] as) ++ map doNot (zip [0..] ts)
     where
-      doAtom (n, a) = atomDiv pol (AtomPos p n) (renderAtom a)
+      doAtom (n, a) = atomDiv pol (Set.member a atoms) (AtomPos p n) (renderAtom a)
       doNot (n, t) = let p' = posExtend p n in
-        notDiv (isDoubleNeg tt n) pol p' (renderTerm renderAtom (not pol) p' t)
+        notDiv (isDoubleNeg tt n) pol (Set.member t tms) (t == true) p' $
+          renderTerm renderAtom atoms' tms' (not pol) p' t
+      atoms' = Set.union atoms (Set.fromList as)
+      tms' = Set.union tms (Set.fromList ts)
 
-renderTopTerm :: (a -> Html) -> Term a -> Html
+renderTopTerm :: (Ord a, Show a) => (a -> Html) -> Term a -> Html
 renderTopTerm renderAtom t =
-  div ! class_ "top" $ renderTerm renderAtom False (Pos []) t
+  div ! class_ "top" $
+    renderTerm renderAtom Set.empty Set.empty False (Pos []) t
 
-renderPage :: (H.ToMarkup a) => Term a -> Html
+renderPage :: (H.ToMarkup a, Ord a, Show a) => Term a -> Html
 renderPage t = H.docTypeHtml $ do
    H.head $ do
     H.title "Formula rendering"

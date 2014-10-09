@@ -19,6 +19,9 @@ import Utils
 
 type Term a = Tree [a]
 
+instance (Ord a) => Ord (Tree a) where
+  compare (Node as ts) (Node as' ts') = compare (as, ts) (as', ts')
+
 instance Monoid (Term a) where
   mempty = Node [] []
   mappend (Node as ns) (Node as' ns') = Node (as ++ as') (ns ++ ns')
@@ -65,23 +68,26 @@ timp t t' = tnot (tand t (tnot t'))
 -- | Does the given term have a child node representing a double
 -- negation?
 hasDoubleNeg :: Term a -> Bool
-hasDoubleNeg (Node [] ts) | any isNeg ts = True
+hasDoubleNeg (Node _ ts) = any isNeg ts
   where isNeg (Node [] [_]) = True
         isNeg _ = False
-hasDoubleNeg _ = False
 
 -- | Does the given child of the given term represent a double
 -- negation?
 isDoubleNeg :: Term a -> Int -> Bool
-isDoubleNeg (Node [] ts) n =
+isDoubleNeg (Node _ ts) n =
   case safeIndex n ts of
     Just (Node [] [_]) -> True
     _ -> False
-isDoubleNeg _ _ = False
 
 -- | Add a double negative to the top level of a term.
 addDoubleNeg :: Term a -> Term a
 addDoubleNeg = tnot . tnot
+
+-- | Remove a negation from the top level of a term, if one exists.
+removeNeg :: Term a -> Maybe (Term a)
+removeNeg (Node [] [t]) = Just t
+removeNeg _ = Nothing
 
 ----------------------
 -- End Double Negation
@@ -267,10 +273,26 @@ insertDoubleNeg :: Pos -> Term a -> Maybe (Term a)
 insertDoubleNeg p = atPos p (Z.modifyTree addDoubleNeg)
 
 -- | Delete the double negation at the given position (if there is
--- one). (Rule 3e, which is always legal)
+-- one). (Rule 3e, which is always legal).
+--
+-- Given the position of the child node that is the double negation,
+-- this extracts that child, deletes it from the tree, removes its
+-- extra negation, and merges it with the parent of the given
+-- position.
 deleteDoubleNeg :: Pos -> Term a -> Maybe (Term a)
-deleteDoubleNeg p = atPos p (Z.modifyTree removeDoubleNeg)
-  where removeDoubleNeg = undefined -- TODO
+deleteDoubleNeg p t = do
+  p' <- parentPos p
+  c <- removeNeg =<< getSubterm p t
+  t' <- deleteSubterm p t
+  atPos p' (Z.modifyTree (tand c)) t'
+
+-- | Is the node at the given position a child that, in its current
+-- context, is doubly negated?
+isDoubleNegAtPos :: Pos -> Term a -> Maybe Bool
+isDoubleNegAtPos p t = do
+  p' <- parentPos p
+  t' <- getSubterm p' t
+  return (isDoubleNeg t' (last (indices p)))
 
 ------------------------------
 -- End Zipper-based Traversals
@@ -294,15 +316,16 @@ insertAtomAllowed :: AtomPos -> Bool
 insertAtomAllowed = not . posPolarity . aPos
 
 -- | Is it legal to delete an arbitrary subterm at the given position?
--- Only if the position refers to a positive (unshaded) node. (Rule
--- 1e)
-deleteAllowed :: Pos -> Bool
-deleteAllowed = posPolarity
+-- Only if the position refers to a positive (unshaded) node, or if
+-- the node exists higher in the tree. (Rule 1e, Rule 2e)
+deleteAllowed :: (Eq a) => Pos -> Term a -> Bool
+deleteAllowed p t = posPolarity p || findTermAbove t p
 
 -- | Is it legal to delete an arbitary atom at the given position?
--- Only if the position refers to a positive (shaded) node. (Rule 1e)
-deleteAtomAllowed :: AtomPos -> Bool
-deleteAtomAllowed = posPolarity . aPos
+-- Only if the position refers to a positive (shaded) node, or if the
+-- atom exists higher in the tree. (Rule 1e, Rule 2e)
+deleteAtomAllowed :: (Eq a) => AtomPos -> Term a -> Bool
+deleteAtomAllowed p t = posPolarity (aPos p) || findAtomAbove t p
 
 -- | Is it legal to copy a subterm from the first position into the
 -- term indicated by the second? Only if the first position encloses
@@ -317,6 +340,7 @@ copyAllowed p p' = p `encloses` p'
 copyAtomAllowed :: AtomPos -> Pos -> Bool
 copyAtomAllowed p p' = aPos p `encloses` p'
 
+{-
 -- | Is it legal to delete the term at the second position relative to
 -- a copy at the first position? Only if the terms at the two
 -- positions are equal and the first position encloses the second.
@@ -340,7 +364,40 @@ deleteAtomCopyAllowed t p p' = mequal == Just True
       a <- getAtom p t
       a' <- getAtom p' t
       return (a == a' && encloses (aPos p) (aPos p'))
+-}
 
 ------------
 -- End Rules
 ------------
+
+--------------------------
+-- Alternative Term Search
+--------------------------
+
+-- | Alternative way to determine whether an atom can be deleted.
+findAtomAbove :: (Eq a) => Term a -> AtomPos -> Bool
+findAtomAbove t p = mfound == Just True
+  where mfound = do
+          tf <- navigate (aPos p) t
+          let as = Z.label tf
+          a <- safeIndex (aIdx p) as
+          as' <- remove (aIdx p) as
+          return (elem a as' || maybe False (findA a) (Z.parent tf))
+        findA a tf = elem a (Z.label tf) ||
+                     maybe False (findA a) (Z.parent tf)
+
+-- | Alternative way to determine whether a term can be deleted.
+findTermAbove :: (Eq a) => Term a -> Pos -> Bool
+findTermAbove t p = mfound == Just True
+  where mfound = do
+          c <- getSubterm p t
+          tf <- navigate p t
+          return (findT c tf)
+        findT c tf =
+           elem c (Z.before tf) ||
+           elem c (Z.after tf) ||
+           maybe False (findT c) (Z.parent tf)
+
+------------------------------
+-- End Alternative Term Search
+------------------------------

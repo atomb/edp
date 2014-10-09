@@ -106,7 +106,7 @@ subtermAbove p c (Clauses cs) =
   c `elem` cs ||
   case p of
     [] -> False
-    i : is | i < length cs -> 
+    i : is | i < length cs ->
            | otherwise -> False
 -}
 
