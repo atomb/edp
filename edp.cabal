@@ -22,4 +22,8 @@ executable edp
                      snap-core,
                      snap-server,
                      split
-  ghc-options:       -Wall
+  ghc-options:       -Wall -Werror
+  other-modules:     Examples
+                     ToHtml
+                     TreeTerm
+                     Utils
