@@ -3,12 +3,10 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module TreeTerm where
 
-import Control.Applicative
 import Data.List (isPrefixOf, intercalate)
 import Data.List.Split (splitOn)
-import Data.Monoid
 import Data.Tree
-import qualified Data.Tree.Zipper as Z
+import Data.Tree.Zipper hiding (last)
 import Text.Read (readMaybe)
 
 import Utils
@@ -160,20 +158,20 @@ posExtend (Pos is) i = Pos (is ++ [i])
 -- Tree Utilities
 -----------------
 
-type TermPosF a = Z.TreePos Z.Full [a]
+type TermPosF a = TreePos Full [a]
 
 -- | Add a child at a given @TreePos@, yilding a full @Tree@.
-addChild :: Tree a -> Z.TreePos Z.Full a -> Tree a
-addChild c = Z.toTree . Z.insert c . Z.children
+addChild :: Tree a -> TreePos Full a -> Tree a
+addChild c = toTree . insert c . children
 
 -- | Get the enclosing @Tree@ of an empty @TreePos@, if any.
-topE :: Z.TreePos Z.Empty a -> Maybe (Tree a)
-topE p = Z.toTree <$> Z.parent p
+topE :: TreePos Empty a -> Maybe (Tree a)
+topE p = toTree <$> parent p
 
 -- | Generalization of @modifyLabel@ from @Data.Tree.Zipper@.
 modifyLabelM :: (Functor m, Applicative m) =>
-                (a -> m a) -> Z.TreePos Z.Full a -> m (Z.TreePos Z.Full a)
-modifyLabelM f p = Z.setLabel <$> f (Z.label p) <*> pure p
+                (a -> m a) -> TreePos Full a -> m (TreePos Full a)
+modifyLabelM f p = setLabel <$> f (label p) <*> pure p
 
 ---------------------
 -- End Tree Utilities
@@ -188,31 +186,31 @@ modifyLabelM f p = Z.setLabel <$> f (Z.label p) <*> pure p
 -- the given position.
 navigate' :: Pos -> (TermPosF a) -> Maybe (TermPosF a)
 navigate' (Pos [])     t = Just t
-navigate' (Pos (i:is)) t = navigate' (Pos is) =<< Z.childAt i t
+navigate' (Pos (i:is)) t = navigate' (Pos is) =<< childAt i t
 
 -- | Create the zipper formed by navigating in the given @Term@ to the
 -- given position.
 navigate :: Pos -> Term a -> Maybe (TermPosF a)
-navigate p = navigate' p . Z.fromTree
+navigate p = navigate' p . fromTree
 
 -- | Apply a function on @TermPosF@ at a particular position within a
 -- term.
 atPos :: Pos -> (TermPosF a -> TermPosF a) -> Term a -> Maybe (Term a)
-atPos p f t = (Z.toTree . f) <$> navigate p t
+atPos p f t = (toTree . f) <$> navigate p t
 
 -- | Apply a partial function on @TermPosF@ at a particular position
 -- within a term.
 atPosM :: Pos -> (TermPosF a -> Maybe (TermPosF a)) -> Term a
        -> Maybe (Term a)
-atPosM p f t = Z.toTree <$> (f =<< navigate p t)
+atPosM p f t = toTree <$> (f =<< navigate p t)
 
 -- | Get the subterm at the given position.
 getSubterm :: Pos -> Term a -> Maybe (Term a)
-getSubterm p t = Z.tree <$> navigate p t
+getSubterm p t = tree <$> navigate p t
 
 -- | Get the atom at the given atom position.
 getAtom :: AtomPos -> Term a -> Maybe a
-getAtom p t = (safeIndex (aIdx p) . Z.label) =<< navigate (aPos p) t
+getAtom p t = (safeIndex (aIdx p) . label) =<< navigate (aPos p) t
 
 -- | Insert a subterm within a given term.
 insertIn :: Pos -> Term a -> Term a -> Maybe (Term a)
@@ -230,12 +228,12 @@ insertByAtom p = insertIn (aPos p)
 
 -- | Insert an atom within the tree node indicated by the given position.
 insertAtom :: Pos -> a -> Term a -> Maybe (Term a)
-insertAtom p a = atPos p (Z.modifyLabel (a:))
+insertAtom p a = atPos p (modifyLabel (a:))
 
 -- | Delete the subterm at the given position. TODO: Should there be a
 -- special case where deleting the entire tree yields @true@?
 deleteSubterm :: Pos -> Term a -> Maybe (Term a)
-deleteSubterm p t = topE =<< (Z.delete <$> navigate p t)
+deleteSubterm p t = topE =<< (delete <$> navigate p t)
 
 -- | Delete the atom at the given atom position.
 deleteAtom :: AtomPos -> Term a -> Maybe (Term a)
@@ -270,7 +268,7 @@ dupAtom pos@(AtomPos p _) = copyAtom pos p
 -- | Insert a double negation around the node at the given position.
 -- (Rule 3i, which is always legal)
 insertDoubleNeg :: Pos -> Term a -> Maybe (Term a)
-insertDoubleNeg p = atPos p (Z.modifyTree addDoubleNeg)
+insertDoubleNeg p = atPos p (modifyTree addDoubleNeg)
 
 -- | Delete the double negation at the given position (if there is
 -- one). (Rule 3e, which is always legal).
@@ -284,7 +282,7 @@ deleteDoubleNeg p t = do
   p' <- parentPos p
   c <- removeNeg =<< getSubterm p t
   t' <- deleteSubterm p t
-  atPos p' (Z.modifyTree (tand c)) t'
+  atPos p' (modifyTree (tand c)) t'
 
 -- | Is the node at the given position a child that, in its current
 -- context, is doubly negated?
@@ -379,12 +377,12 @@ findAtomAbove :: (Eq a) => Term a -> AtomPos -> Bool
 findAtomAbove t p = mfound == Just True
   where mfound = do
           tf <- navigate (aPos p) t
-          let as = Z.label tf
+          let as = label tf
           a <- safeIndex (aIdx p) as
           as' <- remove (aIdx p) as
-          return (elem a as' || maybe False (findA a) (Z.parent tf))
-        findA a tf = elem a (Z.label tf) ||
-                     maybe False (findA a) (Z.parent tf)
+          return (elem a as' || maybe False (findA a) (parent tf))
+        findA a tf = elem a (label tf) ||
+                     maybe False (findA a) (parent tf)
 
 -- | Alternative way to determine whether a term can be deleted.
 findTermAbove :: (Eq a) => Term a -> Pos -> Bool
@@ -394,9 +392,9 @@ findTermAbove t p = mfound == Just True
           tf <- navigate p t
           return (findT c tf)
         findT c tf =
-           elem c (Z.before tf) ||
-           elem c (Z.after tf) ||
-           maybe False (findT c) (Z.parent tf)
+           elem c (before tf) ||
+           elem c (after tf) ||
+           maybe False (findT c) (parent tf)
 
 ------------------------------
 -- End Alternative Term Search
